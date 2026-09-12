@@ -70,7 +70,7 @@ The analytical queries in `03_core_queries.sql` cover:
 
 ---
 
-## Published Research
+## Published Articles
 
 This warehouse powers an ongoing series of expert articles 
 on African emissions and climate policy.
@@ -99,4 +99,5 @@ pip install pandas sqlalchemy mysql-connector-python openpyxl
 
 **Emmanuel John-Adeyemi**  
 Climate Data Analyst | Green Ledger Africa  
-[LinkedIn](https://www.linkedin.com/in/emmanuel-john-adeyemi/)[Substack](https://substack.com/@emmanuelja)
+[LinkedIn](https://www.linkedin.com/in/emmanuel-john-adeyemi/)
+[Substack](https://substack.com/@emmanuelja)
