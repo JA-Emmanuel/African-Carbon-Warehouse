@@ -75,7 +75,7 @@ The analytical queries in `03_core_queries.sql` cover:
 This warehouse powers an ongoing series of expert articles 
 on African emissions and climate policy.
 
-→ [View all published articles](articles/ARTICLES.md)  
+→ [View all published articles](articles/articles.md)  
 → [Green Ledger Africa](https://substack.com/@greenledgerafrica)
 
 ---
