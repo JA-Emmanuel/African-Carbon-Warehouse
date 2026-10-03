@@ -23,7 +23,7 @@ a structured MySQL database for analytical querying.
 | greenhouse_gas_emissions | country_code + year + Carbon_intensity (emissions_per_GDP) + Carbon_per_capita| 2,860 | Country-level emission metrics |
 | sectoral_emissions | country_code + year + sector + gas | 58,520 | Sector-level breakdown |
 | world_bank_indicators | country_code + country_name + year + gdp_growth_pct + gdp_usd_bn +
-population + urban_pop_pct + fdi_pct_gdp | world bank indicators, secondary analytical dimension
+population + urban_pop_pct + fdi_pct_gdp | 2860 | world bank indicators, secondary analytical dimension
 
 ---
 
