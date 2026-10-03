@@ -719,6 +719,190 @@ print(f'sectoral_emissions loaded: {len(sectoral_load):,} rows')
 
 ---
 
+## 18. Fetch World Bank Data
+
+With the base table clean and metrics derived, this section 
+enriches it with external economic and development indicators 
+fetched directly from the World Bank Open Data API.
+
+**Why the World Bank API:**
+EDGAR provides the emissions side of the story. The World Bank 
+provides the economic and development side — GDP growth, 
+population, urbanisation, and investment flows. 
+Together they make the warehouse analytically complete.
+
+**What is being fetched:**
+
+| Column | World Bank Code | Description |
+|---|---|---|
+| gdp_growth_pct | NY.GDP.MKTP.KD.ZG | GDP growth % year-on-year |
+| gdp_usd_bn | NY.GDP.MKTP.KD | GDP in constant 2015 USD billions |
+| population | SP.POP.TOTL | Total population |
+| urban_pop_pct | SP.URB.TOTL.IN.ZS | Urban population % |
+| fdi_pct_gdp | BX.KLT.DINV.WD.GD.ZS | FDI net inflows as % of GDP |
+
+**How the fetch works:**
+- `wb_fetch()` takes an indicator code and a list of ISO3 
+  country codes and returns a clean dataframe of values 
+  by country and year
+- All 49 countries are fetched in a single API call per 
+  indicator using semicolon-separated ISO3 codes
+- `time.sleep(0.5)` is added between calls to avoid 
+  hitting the World Bank API rate limit
+- Failed fetches return an empty dataframe and print a 
+  warning rather than crashing the pipeline
+
+>  **Note:** This cell makes live API calls and takes 
+> approximately 30–60 seconds to complete. Requires an 
+> active internet connection.
+
+```python
+WB_BASE = "https://api.worldbank.org/v2"
+
+def wb_fetch(indicator, iso3_codes, start_year=1970, end_year=2024):
+    codes_str = ';'.join(iso3_codes)
+    url = f"{WB_BASE}/country/{codes_str}/indicator/{indicator}"
+    params = {'format': 'json', 'per_page': 5000, 'date': f'{start_year}:{end_year}'}
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+        if len(data) < 2 or not data[1]:
+            return pd.DataFrame(columns=['Code', 'Year', 'value'])
+        rows = []
+        for entry in data[1]:
+            if entry['value'] is not None:
+                rows.append({
+                    'Code': entry['countryiso3code'],
+                    'Year': int(entry['date']),
+                    'value': entry['value']
+                })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        print(f"Warning: fetch failed for {indicator}: {e}")
+        return pd.DataFrame(columns=['Code', 'Year', 'value'])
+
+iso3_list = base['Code'].dropna().unique().tolist()
+print(f"Fetching World Bank data for {len(iso3_list)} countries...")
+
+WB_INDICATORS = {
+    'gdp_growth_pct':     'NY.GDP.MKTP.KD.ZG',
+    'gdp_usd_bn':         'NY.GDP.MKTP.KD',
+    'population':         'SP.POP.TOTL',
+    'urban_pop_pct':      'SP.URB.TOTL.IN.ZS',
+    'fdi_pct_gdp':        'BX.KLT.DINV.WD.GD.ZS',
+}
+
+wb_data = {}
+for col_name, indicator_code in WB_INDICATORS.items():
+    print(f"Fetching {col_name}...", end=' ')
+    df_wb = wb_fetch(indicator_code, iso3_list)
+    df_wb = df_wb.rename(columns={'value': col_name})
+    wb_data[col_name] = df_wb
+    print(f"{len(df_wb)} rows")
+    time.sleep(0.5)
+
+print("\nWorld Bank fetch complete.")
+```
+
+> ✅ World Bank fetch complete. five indicators retrieved 
+> across all 49 countries. Each indicator is stored as a 
+> separate dataframe in `wb_data` keyed by column name, 
+> ready to merge into the base table in the next step.
+
+
+## 19. Build World Bank Indicators Table 
+
+Rather than merging World Bank data into the base table, 
+it is loaded into its own dedicated table — `world_bank_indicators`. 
+`world_bank_indicators` validates our per capita figures from EDGAR and enables 
+population-weighted regional analysis. Columns here like Urbanisation is one of 
+the most reliable predictors of emissions growth in African economies. 
+
+**Primary key:** `country_code + year` (composite) — the same 
+grain as `greenhouse_gas_emissions`, making joins between the 
+two tables straightforward and direct.
+
+**Columns:**
+
+| Column | Description |
+|---|---|
+| country_code | ISO3 country code — part of composite PK |
+| country_name | Full country name |
+| year | Year — part of composite PK |
+| gdp_growth_pct | GDP growth % year-on-year |
+| gdp_usd_bn | GDP in constant 2015 USD billions |
+| population | Total population |
+| urban_pop_pct | Urban population % |
+| fdi_pct_gdp | FDI net inflows as % of GDP |
+
+```python
+# Start from country-year combinations in the base table
+wb_merged = base[['Code', 'Country', 'Year']].drop_duplicates().copy()
+wb_merged = wb_merged.rename(columns={
+    'Code':    'country_code',
+    'Country': 'country_name',
+    'Year':    'year'
+})
+
+# Merge each World Bank indicator on country code and year
+for col_name, df_wb in wb_data.items():
+    df_wb_renamed = df_wb[['Code', 'Year', col_name]].rename(columns={
+        'Code': 'country_code',
+        'Year': 'year'
+    })
+    wb_merged = wb_merged.merge(df_wb_renamed, on=['country_code', 'year'], how='left')
+
+print("World Bank indicators table shape:", wb_merged.shape)
+print("Columns:", wb_merged.columns.tolist())
+display(wb_merged.head(5))
+```
+
+> ✅ World Bank indicators table built. Shape confirmed — 
+> one row per country per year, with all five indicators 
+> as columns.
+
+---
+## 15. Load world_bank_indicators into MySQL
+
+Create the table in MySQL and load the merged World Bank 
+data. The table uses the same composite primary key as 
+`greenhouse_gas_emissions` — `country_code + year` — so 
+the two tables join on a single clean condition.
+
+```python
+# Create the table in MySQL
+wb_schema = """
+CREATE TABLE IF NOT EXISTS world_bank_indicators (
+    country_code        CHAR(3)      NOT NULL,
+    country_name        VARCHAR(100) NOT NULL,
+    year                SMALLINT     NOT NULL,
+    gdp_growth_pct      FLOAT,
+    gdp_usd_bn          FLOAT,
+    population          BIGINT,
+    urban_pop_pct       FLOAT,
+    fdi_pct_gdp         FLOAT,
+    PRIMARY KEY (country_code, year)
+);
+"""
+
+with engine.connect() as conn:
+    conn.execute(text(wb_schema))
+    conn.commit()
+
+print("world_bank_indicators table created.")
+
+# Load the data
+wb_merged.to_sql('world_bank_indicators', engine, if_exists='replace',
+                  index=False, chunksize=500)
+
+print(f"world_bank_indicators loaded: {len(wb_merged):,} rows")
+```
+
+> ✅ `world_bank_indicators` loaded successfully. Table sits 
+> alongside `greenhouse_gas_emissions` and joins to it cleanly 
+> on `country_code + year`
+
 ## 18. Verify Data Load
 
 Run a final verification check across all four tables to 
