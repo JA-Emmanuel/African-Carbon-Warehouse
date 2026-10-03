@@ -52,7 +52,10 @@ The warehouse covers:
 15. [Load Dimension Tables](#15-load-dimension-tables)
 16. [Load greenhouse_gas_emissions](#16-load-greenhouse_gas_emissions)
 17. [Load sectoral_emissions](#17-load-sectoral_emissions)
-18. [Verify Data Load](#18-verify-data-load)
+18. [Fetch World Banl Data](#18-fetch-world-bank-data)
+19. [Build World Bank Indicators Table](#19-build-world-bank-indicators-table)
+20. [Load World Bank Indicators into MySQL](#20-load-world_bank_indicators-into-mysql)
+21. [Verify Data Load](#21-verify-data-load)
 
 ---
 
@@ -72,6 +75,8 @@ Import all required libraries and set database credentials.
 import pandas as pd
 import requests
 import mysql.connector
+import time
+import requests
 from sqlalchemy import create_engine, text
 import time
 
@@ -818,6 +823,7 @@ it is loaded into its own dedicated table — `world_bank_indicators`.
 `world_bank_indicators` validates our per capita figures from EDGAR and enables 
 population-weighted regional analysis. Columns here like Urbanisation is one of 
 the most reliable predictors of emissions growth in African economies. 
+Missing values in the non–composite columns are filled with zeros
 
 **Primary key:** `country_code + year` (composite) — the same 
 grain as `greenhouse_gas_emissions`, making joins between the 
@@ -855,7 +861,14 @@ for col_name, df_wb in wb_data.items():
 
 print("World Bank indicators table shape:", wb_merged.shape)
 print("Columns:", wb_merged.columns.tolist())
-display(wb_merged.head(5))
+
+# Fill missing values with 0 for indicator columns only
+indicator_cols = ['gdp_growth_pct', 'gdp_usd_bn', 'population', 'urban_pop_pct', 'fdi_pct_gdp']
+wb_merged[indicator_cols] = wb_merged[indicator_cols].fillna(0)
+
+print("Missing values after fill:")
+print(wb_merged.isnull().sum())
+display(wb_merged)
 ```
 
 > ✅ World Bank indicators table built. Shape confirmed — 
@@ -863,7 +876,7 @@ display(wb_merged.head(5))
 > as columns.
 
 ---
-## 15. Load world_bank_indicators into MySQL
+## 20. Load world_bank_indicators into MySQL
 
 Create the table in MySQL and load the merged World Bank 
 data. The table uses the same composite primary key as 
@@ -903,9 +916,9 @@ print(f"world_bank_indicators loaded: {len(wb_merged):,} rows")
 > alongside `greenhouse_gas_emissions` and joins to it cleanly 
 > on `country_code + year`
 
-## 18. Verify Data Load
+## 21. Verify Data Load
 
-Run a final verification check across all four tables to 
+Run a final verification check across all five tables to 
 confirm the warehouse has loaded correctly.
 
 **Expected row counts:**
@@ -916,9 +929,10 @@ confirm the warehouse has loaded correctly.
 | gas | 3 | CO2, CH4, N2O |
 | greenhouse_gas_emissions | 2,860 | 52 countries x 55 years |
 | sectoral_emissions | 58,520 | 8 sectors x 3 gases x 55 years x 52 countries |
+| world_bank_indicators | 2,860 | 52 countries x 55 years |
 
 ```python
-tables = ['dim_time', 'gas', 'greenhouse_gas_emissions', 'sectoral_emissions']
+tables = ['dim_time', 'gas', 'greenhouse_gas_emissions', 'sectoral_emissions', 'world_bank_indicators']
 
 for table in tables:
     count = pd.read_sql(f'SELECT COUNT(*) AS n FROM {table}', engine)['n'][0]
@@ -929,9 +943,14 @@ display(pd.read_sql('SELECT * FROM greenhouse_gas_emissions LIMIT 5', engine))
 
 print('\nSample from sectoral_emissions:')
 display(pd.read_sql('SELECT * FROM sectoral_emissions LIMIT 5', engine))
+
+print('\nSample from world_bank_indicators:')
+display(pd.read_sql('SELECT * FROM sectoral_emissions LIMIT 5', engine))
+
+
 ```
 
-> All four tables verified successfully. 
+> All five tables verified successfully. 
 > Expect lower row count for sectoral_emissions. Some countries 
 > don't have quantifiable emissions and some sectors 
 > emit non-quantifiable emissions in some countriesRow counts match 
